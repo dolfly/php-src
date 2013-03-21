@@ -34,6 +34,8 @@
 #include "collator/collator_create.h"
 #include "collator/collator_error.h"
 
+#include "converter/converter.h"
+
 #include "formatter/formatter.h"
 #include "formatter/formatter_class.h"
 #include "formatter/formatter_attr.h"
@@ -84,7 +86,7 @@
 
 #include "idn/idn.h"
 
-#if U_ICU_VERSION_MAJOR_NUM > 3 && U_ICU_VERSION_MINOR_NUM >=2
+#if U_ICU_VERSION_MAJOR_NUM * 1000 + U_ICU_VERSION_MINOR_NUM >= 4002
 # include "spoofchecker/spoofchecker_class.h"
 # include "spoofchecker/spoofchecker.h"
 # include "spoofchecker/spoofchecker_create.h"
@@ -963,7 +965,7 @@ PHP_MINIT_FUNCTION( intl )
 	/* Expose IDN constants to PHP scripts. */
 	idn_register_constants(INIT_FUNC_ARGS_PASSTHRU);
 
-#if U_ICU_VERSION_MAJOR_NUM > 3 && U_ICU_VERSION_MINOR_NUM >=2
+#if U_ICU_VERSION_MAJOR_NUM * 1000 + U_ICU_VERSION_MINOR_NUM >= 4002
 	/* Register 'Spoofchecker' PHP class */
 	spoofchecker_register_Spoofchecker_class( TSRMLS_C );
 
@@ -985,6 +987,9 @@ PHP_MINIT_FUNCTION( intl )
 
 	/* Global error handling. */
 	intl_error_init( NULL TSRMLS_CC );
+
+	/* 'Converter' class for codepage conversions */
+	php_converter_minit(INIT_FUNC_ARGS_PASSTHRU);
 
 	return SUCCESS;
 }

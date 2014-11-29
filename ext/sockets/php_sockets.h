@@ -1,8 +1,8 @@
 /*
    +----------------------------------------------------------------------+
-   | PHP Version 5                                                        |
+   | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2013 The PHP Group                                |
+   | Copyright (c) 1997-2014 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -59,7 +59,7 @@ typedef struct {
 	int			type;
 	int			error;
 	int			blocking;
-	zval		*zstream;
+	zval		zstream;
 } php_socket;
 
 #ifdef PHP_WIN32
@@ -70,6 +70,8 @@ struct	sockaddr_un {
 #endif
 
 PHP_SOCKETS_API int php_sockets_le_socket(void);
+PHP_SOCKETS_API php_socket *php_create_socket(void);
+PHP_SOCKETS_API void php_destroy_socket(zend_resource *rsrc TSRMLS_DC);
 
 #define php_sockets_le_socket_name "Socket"
 
@@ -107,6 +109,10 @@ php_socket *socket_import_file_descriptor(PHP_SOCKET sock TSRMLS_DC);
 
 #else
 #define phpext_sockets_ptr NULL
+#endif
+
+#if defined(_AIX) && !defined(HAVE_SA_SS_FAMILY)
+# define ss_family __ss_family
 #endif
 
 #endif

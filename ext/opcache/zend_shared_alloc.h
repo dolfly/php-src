@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend OPcache                                                         |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2013 The PHP Group                                |
+   | Copyright (c) 1998-2014 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -89,10 +89,6 @@ typedef struct _handler_entry {
 	zend_shared_memory_handlers *handler;
 } zend_shared_memory_handler_entry;
 
-typedef struct _zend_shared_memory_block_header {
-	int size;
-} zend_shared_memory_block_header;
-
 typedef struct _zend_shared_memory_state {
 	int *positions;   /* current positions for each segment */
 	int  shared_free; /* amount of free shared memory */
@@ -121,7 +117,7 @@ extern zend_smm_shared_globals *smm_shared_globals;
 
 #define SHARED_ALLOC_REATTACHED		(SUCCESS+1)
 
-int zend_shared_alloc_startup(int requested_size);
+int zend_shared_alloc_startup(size_t requested_size);
 void zend_shared_alloc_shutdown(void);
 
 /* allocate shared memory block */
@@ -134,7 +130,7 @@ int  zend_shared_memdup_size(void *p, size_t size);
 typedef union _align_test {
 	void   *ptr;
 	double  dbl;
-	long    lng;
+	zend_long  lng;
 } align_test;
 
 #if ZEND_GCC_VERSION >= 2000

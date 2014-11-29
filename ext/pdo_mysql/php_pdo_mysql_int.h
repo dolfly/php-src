@@ -1,8 +1,8 @@
 /*
   +----------------------------------------------------------------------+
-  | PHP Version 5                                                        |
+  | PHP Version 7                                                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2013 The PHP Group                                |
+  | Copyright (c) 1997-2014 The PHP Group                                |
   +----------------------------------------------------------------------+
   | This source file is subject to version 3.01 of the PHP license,      |
   | that is bundled with this package in the file LICENSE, and is        |
@@ -106,7 +106,7 @@ typedef struct {
 	unsigned fetch_table_names:1;
 	unsigned _reserved:31;	
 #if !PDO_USE_MYSQLND
-	unsigned long max_buffer_size;
+	zend_ulong max_buffer_size;
 #endif
 
 	pdo_mysql_error_info einfo;
@@ -118,31 +118,31 @@ typedef struct {
 
 typedef struct {
 	pdo_mysql_db_handle 	*H;
-	MYSQL_RES		*result;
-	const MYSQL_FIELD	*fields;
-	MYSQL_ROW		current_data;
+	MYSQL_RES				*result;
+	const MYSQL_FIELD		*fields;
+	MYSQL_ROW				current_data;
 #if PDO_USE_MYSQLND
-	unsigned long		*current_lengths;
+	zend_ulong		*current_lengths;
 #else
-	long			*current_lengths;
+	zend_long		*current_lengths;
 #endif
-	pdo_mysql_error_info einfo;
+	pdo_mysql_error_info 	einfo;
 #if PDO_USE_MYSQLND
-	MYSQLND_STMT 		*stmt;
+	MYSQLND_STMT 			*stmt;
 #else
-	MYSQL_STMT		*stmt;
+	MYSQL_STMT				*stmt;
 #endif	
-	int num_params;
+	int 					num_params;
 	PDO_MYSQL_PARAM_BIND	*params;
 #ifndef PDO_USE_MYSQLND
-	my_bool			*in_null;
-	unsigned long		*in_length;
+	my_bool					*in_null;
+	zend_ulong			*in_length;
 #endif
 	PDO_MYSQL_PARAM_BIND	*bound_result;
-	my_bool			*out_null;
-	unsigned long		*out_length;
-	unsigned int		params_given;
-	unsigned		max_length:1;
+	my_bool					*out_null;
+	zend_ulong			*out_length;
+	unsigned int			params_given;
+	unsigned				max_length:1;
 } pdo_mysql_stmt;
 
 extern pdo_driver_t pdo_mysql_driver;
@@ -171,7 +171,7 @@ enum {
 	PDO_MYSQL_ATTR_SSL_CA,
 	PDO_MYSQL_ATTR_SSL_CAPATH,
 	PDO_MYSQL_ATTR_SSL_CIPHER,
-#if MYSQL_VERSION_ID > 50605 || defined(MYSQLI_USE_MYSQLND)
+#if MYSQL_VERSION_ID > 50605 || defined(PDO_USE_MYSQLND)
 	PDO_MYSQL_ATTR_SERVER_PUBLIC_KEY
 #endif
 };

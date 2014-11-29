@@ -1,8 +1,8 @@
 /*
    +----------------------------------------------------------------------+
-   | PHP Version 5                                                        |
+   | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2013 The PHP Group                                |
+   | Copyright (c) 1997-2014 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -243,7 +243,12 @@ PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY_EX("mssql.max_links",				"-1",	PHP_INI_SYSTEM,	OnUpdateLong,	max_links,					zend_mssql_globals,		mssql_globals,	display_link_numbers)
 	STD_PHP_INI_ENTRY_EX("mssql.min_error_severity",	"10",	PHP_INI_ALL,	OnUpdateLong,	cfg_min_error_severity,		zend_mssql_globals,		mssql_globals,	display_link_numbers)
 	STD_PHP_INI_ENTRY_EX("mssql.min_message_severity",	"10",	PHP_INI_ALL,	OnUpdateLong,	cfg_min_message_severity,	zend_mssql_globals,		mssql_globals,	display_link_numbers)
-	STD_PHP_INI_BOOLEAN("mssql.compatability_mode",		"0",	PHP_INI_ALL,	OnUpdateBool,	compatability_mode,			zend_mssql_globals,		mssql_globals)
+	/*
+	  mssql.compatAbility_mode (with typo) was used for relatively long time.
+	  Unless it is fixed the old version is also kept for compatibility reasons.
+	*/
+	STD_PHP_INI_BOOLEAN("mssql.compatability_mode",		"0",	PHP_INI_ALL,	OnUpdateBool,	compatibility_mode,			zend_mssql_globals,		mssql_globals)
+	STD_PHP_INI_BOOLEAN("mssql.compatibility_mode",		"0",	PHP_INI_ALL,	OnUpdateBool,	compatibility_mode,			zend_mssql_globals,		mssql_globals)
 	STD_PHP_INI_ENTRY_EX("mssql.connect_timeout",    	"5",	PHP_INI_ALL,	OnUpdateLong,	connect_timeout,			zend_mssql_globals,		mssql_globals,	display_link_numbers)
 	STD_PHP_INI_ENTRY_EX("mssql.timeout",      			"60",	PHP_INI_ALL,	OnUpdateLong,	timeout,					zend_mssql_globals,		mssql_globals,	display_link_numbers)
 	STD_PHP_INI_ENTRY_EX("mssql.textsize",   			"-1",	PHP_INI_ALL,	OnUpdateLong,	textsize,					zend_mssql_globals,		mssql_globals,	display_text_size)
@@ -280,7 +285,7 @@ static int php_mssql_message_handler(DBPROCESS *dbproc, DBINT msgno,int msgstate
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "message: %s (severity %d)", msgtext, severity);
 	}
 	if (MS_SQL_G(server_message)) {
-		STR_FREE(MS_SQL_G(server_message));
+		zend_string_free(MS_SQL_G(server_message));
 		MS_SQL_G(server_message) = NULL;
 	}
 	MS_SQL_G(server_message) = estrdup(msgtext);
@@ -325,8 +330,8 @@ static void _free_result(mssql_result *result, int free_fields)
 	
 	if (free_fields && result->fields) {
 		for (i=0; i<result->num_fields; i++) {
-			STR_FREE(result->fields[i].name);
-			STR_FREE(result->fields[i].column_source);
+			zend_string_free(result->fields[i].name);
+			zend_string_free(result->fields[i].column_source);
 		}
 		efree(result->fields);
 	}
@@ -415,12 +420,12 @@ static void _mssql_bind_hash_dtor(void *data)
 */
 static PHP_GINIT_FUNCTION(mssql)
 {
-	long compatability_mode;
+	long compatibility_mode;
 
 	mssql_globals->num_persistent = 0;
 	mssql_globals->get_column_content = php_mssql_get_column_content_with_type;
-	if (cfg_get_long("mssql.compatability_mode", &compatability_mode) == SUCCESS) {
-		if (compatability_mode) {
+	if (cfg_get_long("mssql.compatibility_mode", &compatibility_mode) == SUCCESS) {
+		if (compatibility_mode) {
 			mssql_globals->get_column_content = php_mssql_get_column_content_without_type;	
 		}
 	}
@@ -484,7 +489,7 @@ PHP_RINIT_FUNCTION(mssql)
 {
 	MS_SQL_G(default_link) = -1;
 	MS_SQL_G(num_links) = MS_SQL_G(num_persistent);
-	MS_SQL_G(appname) = estrndup("PHP 5", 5);
+	MS_SQL_G(appname) = estrndup("PHP 7", 5);
 	MS_SQL_G(server_message) = NULL;
 	MS_SQL_G(min_error_severity) = MS_SQL_G(cfg_min_error_severity);
 	MS_SQL_G(min_message_severity) = MS_SQL_G(cfg_min_message_severity);
@@ -502,10 +507,10 @@ PHP_RINIT_FUNCTION(mssql)
 */
 PHP_RSHUTDOWN_FUNCTION(mssql)
 {
-	STR_FREE(MS_SQL_G(appname));
+	zend_string_free(MS_SQL_G(appname));
 	MS_SQL_G(appname) = NULL;
 	if (MS_SQL_G(server_message)) {
-		STR_FREE(MS_SQL_G(server_message));
+		zend_string_free(MS_SQL_G(server_message));
 		MS_SQL_G(server_message) = NULL;
 	}
 	return SUCCESS;
@@ -1513,7 +1518,7 @@ static void php_mssql_fetch_hash(INTERNAL_FUNCTION_PARAMETERS, int result_type)
 	ZEND_FETCH_RESOURCE(result, mssql_result *, &mssql_result_index, -1, "MS SQL-result", le_result);	
 
 	if (MS_SQL_G(server_message)) {
-		STR_FREE(MS_SQL_G(server_message));
+		zend_string_free(MS_SQL_G(server_message));
 		MS_SQL_G(server_message) = NULL;
 	}
 
@@ -1533,11 +1538,11 @@ static void php_mssql_fetch_hash(INTERNAL_FUNCTION_PARAMETERS, int result_type)
 				data_len = Z_STRLEN(result->data[result->cur_row][i]);
 
 				if (result_type & MSSQL_NUM) {
-					add_index_stringl(return_value, i, data, data_len, 1);
+					add_index_stringl(return_value, i, data, data_len);
 				}
 				
 				if (result_type & MSSQL_ASSOC) {
-					add_assoc_stringl(return_value, result->fields[i].name, data, data_len, 1);
+					add_assoc_stringl(return_value, result->fields[i].name, data, data_len);
 				}
 			}
 			else if (Z_TYPE(result->data[result->cur_row][i]) == IS_LONG) {
@@ -1713,11 +1718,11 @@ PHP_FUNCTION(mssql_fetch_field)
 
 	object_init(return_value);
 
-	add_property_string(return_value, "name",result->fields[field_offset].name, 1);
+	add_property_string(return_value, "name",result->fields[field_offset].name);
 	add_property_long(return_value, "max_length",result->fields[field_offset].max_length);
-	add_property_string(return_value, "column_source",result->fields[field_offset].column_source, 1);
+	add_property_string(return_value, "column_source",result->fields[field_offset].column_source);
 	add_property_long(return_value, "numeric", result->fields[field_offset].numeric);
-	add_property_string(return_value, "type", php_mssql_get_field_name(Z_TYPE(result->fields[field_offset])), 1);
+	add_property_string(return_value, "type", php_mssql_get_field_name(Z_TYPE(result->fields[field_offset])));
 }
 /* }}} */
 

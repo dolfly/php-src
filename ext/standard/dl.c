@@ -1,8 +1,8 @@
 /*
    +----------------------------------------------------------------------+
-   | PHP Version 5                                                        |
+   | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2013 The PHP Group                                |
+   | Copyright (c) 1997-2014 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -54,7 +54,7 @@
 PHPAPI PHP_FUNCTION(dl)
 {
 	char *filename;
-	int filename_len;
+	size_t filename_len;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &filename, &filename_len) == FAILURE) {
 		return;
@@ -129,7 +129,7 @@ PHPAPI int php_load_extension(char *filename, int type, int start_now TSRMLS_DC)
 		}
 		libpath = estrdup(filename);
 	} else if (extension_dir && extension_dir[0]) {
-		int extension_dir_len = strlen(extension_dir);
+		int extension_dir_len = (int)strlen(extension_dir);
 
 		if (IS_SLASH(extension_dir[extension_dir_len-1])) {
 			spprintf(&libpath, 0, "%s%s", extension_dir, filename); /* SAFE */
@@ -145,7 +145,7 @@ PHPAPI int php_load_extension(char *filename, int type, int start_now TSRMLS_DC)
 	if (!handle) {
 #if PHP_WIN32
 		char *err = GET_DL_ERROR();
-		if (err && (*err != "")) {
+		if (err && (*err != '\0')) {
 			php_error_docref(NULL TSRMLS_CC, error_type, "Unable to load dynamic library '%s' - %s", libpath, err);
 			LocalFree(err);
 		} else {
@@ -171,6 +171,11 @@ PHPAPI int php_load_extension(char *filename, int type, int start_now TSRMLS_DC)
 	}
 
 	if (!get_module) {
+		if (DL_FETCH_SYMBOL(handle, "zend_extension_entry") || DL_FETCH_SYMBOL(handle, "_zend_extension_entry")) {
+			DL_UNLOAD(handle);
+			php_error_docref(NULL TSRMLS_CC, error_type, "Invalid library (appears to be a Zend Extension, try loading using zend_extension=%s from php.ini)", filename);
+			return FAILURE;
+		}
 		DL_UNLOAD(handle);
 		php_error_docref(NULL TSRMLS_CC, error_type, "Invalid library (maybe not a PHP library) '%s'", filename);
 		return FAILURE;

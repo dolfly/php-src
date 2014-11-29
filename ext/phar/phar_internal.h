@@ -2,7 +2,7 @@
   +----------------------------------------------------------------------+
   | phar php single-file executable PHP extension                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 2006-2013 The PHP Group                                |
+  | Copyright (c) 2006-2014 The PHP Group                                |
   +----------------------------------------------------------------------+
   | This source file is subject to version 3.01 of the PHP license,      |
   | that is bundled with this package in the file LICENSE, and is        |
@@ -35,6 +35,7 @@
 #include "zend_operators.h"
 #include "zend_qsort.h"
 #include "zend_vm.h"
+#include "zend_smart_str.h"
 #include "main/php_streams.h"
 #include "main/streams/php_stream_plain_wrapper.h"
 #include "main/SAPI.h"
@@ -49,12 +50,11 @@
 #include "ext/standard/md5.h"
 #include "ext/standard/sha1.h"
 #include "ext/standard/php_var.h"
-#include "ext/standard/php_smart_str.h"
 #include "ext/standard/php_versioning.h"
 #ifndef PHP_WIN32
 #include "TSRM/tsrm_strtok_r.h"
 #endif
-#include "TSRM/tsrm_virtual_cwd.h"
+#include "Zend/zend_virtual_cwd.h"
 #if HAVE_SPL
 #include "ext/spl/spl_array.h"
 #include "ext/spl/spl_directory.h"
@@ -63,25 +63,9 @@
 #include "ext/spl/spl_iterators.h"
 #endif
 #include "php_phar.h"
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
 #ifdef PHAR_HASH_OK
 #include "ext/hash/php_hash.h"
 #include "ext/hash/php_hash_sha.h"
-#endif
-
-#ifndef E_RECOVERABLE_ERROR
-# define E_RECOVERABLE_ERROR E_ERROR
-#endif
-
-#ifndef pestrndup
-# define pestrndup(s, length, persistent) ((persistent)?zend_strndup((s),(length)):estrndup((s),(length)))
-#endif
-
-#ifndef ALLOC_PERMANENT_ZVAL
-# define ALLOC_PERMANENT_ZVAL(z) \
-	(z) = (zval*)malloc(sizeof(zval))
 #endif
 
 /* PHP_ because this is public information via MINFO */
@@ -259,17 +243,17 @@ typedef struct _phar_entry_info {
 	/* remainder */
 	/* when changing compression, save old flags in case fp is NULL */
 	php_uint32               old_flags;
-	zval                     *metadata;
+	zval                     metadata;
 	int                      metadata_len; /* only used for cached manifests */
 	php_uint32               filename_len;
 	char                     *filename;
 	enum phar_fp_type        fp_type;
 	/* offset within original phar file of the file contents */
-	long                     offset_abs;
+	zend_long                     offset_abs;
 	/* offset within fp of the file contents */
-	long                     offset;
+	zend_long                     offset;
 	/* offset within original phar file of the file header (for zip-based/tar-based) */
-	long                     header_offset;
+	zend_long                     header_offset;
 	php_stream               *fp;
 	php_stream               *cfp;
 	int                      fp_refcount;
@@ -327,7 +311,7 @@ struct _phar_archive_data {
 	php_uint32               sig_flags;
 	int                      sig_len;
 	char                     *signature;
-	zval                     *metadata;
+	zval                     metadata;
 	int                      metadata_len; /* only used for cached manifests */
 	uint                     phar_pos;
 	/* if 1, then this alias was manually specified by the user and is not a permanent alias */
@@ -350,7 +334,7 @@ struct _phar_archive_data {
 typedef struct _phar_entry_fp_info {
 	enum phar_fp_type        fp_type;
 	/* offset within fp of the file contents */
-	long                     offset;
+	zend_long                     offset;
 } phar_entry_fp_info;
 
 struct _phar_entry_fp {
@@ -431,7 +415,7 @@ static inline void phar_set_pharufp(phar_archive_data *phar, php_stream *fp TSRM
 	PHAR_GLOBALS->cached_fp[phar->phar_pos].ufp = fp;
 }
 
-static inline void phar_set_fp_type(phar_entry_info *entry, enum phar_fp_type type, off_t offset TSRMLS_DC)
+static inline void phar_set_fp_type(phar_entry_info *entry, enum phar_fp_type type, zend_off_t offset TSRMLS_DC)
 {
 	phar_entry_fp_info *data;
 
@@ -453,7 +437,7 @@ static inline enum phar_fp_type phar_get_fp_type(phar_entry_info *entry TSRMLS_D
 	return PHAR_GLOBALS->cached_fp[entry->phar->phar_pos].manifest[entry->manifest_pos].fp_type;
 }
 
-static inline off_t phar_get_fp_offset(phar_entry_info *entry TSRMLS_DC)
+static inline zend_off_t phar_get_fp_offset(phar_entry_info *entry TSRMLS_DC)
 {
 	if (!entry->is_persistent) {
 		return entry->offset;
@@ -482,9 +466,9 @@ typedef struct _phar_entry_data {
 	phar_archive_data        *phar;
 	php_stream               *fp;
 	/* stream position proxy, allows multiple open streams referring to the same fp */
-	off_t                    position;
+	zend_off_t                    position;
 	/* for copies of the phar fp, defines where 0 is */
-	off_t                    zero;
+	zend_off_t                    zero;
 	unsigned int             for_write:1;
 	unsigned int             is_zip:1;
 	unsigned int             is_tar:1;
@@ -494,97 +478,21 @@ typedef struct _phar_entry_data {
 #if HAVE_SPL
 /* archive php object */
 union _phar_archive_object {
-	zend_object              std;
 	spl_filesystem_object    spl;
-	struct {
-		zend_object          std;
-		phar_archive_data    *archive;
-	} arc;
+	phar_archive_data        *archive;
 };
 #endif
 
 #if HAVE_SPL
 /* entry php object */
 union _phar_entry_object {
-	zend_object              std;
 	spl_filesystem_object    spl;
-	struct {
-		zend_object          std;
-		phar_entry_info      *entry;
-	} ent;
+	phar_entry_info          *entry;
 };
 #endif
 
 #ifndef PHAR_MAIN
-# if PHP_VERSION_ID >= 50300
 extern char *(*phar_save_resolve_path)(const char *filename, int filename_len TSRMLS_DC);
-# endif
-#endif
-
-#if PHP_VERSION_ID < 50209
-static inline size_t phar_stream_copy_to_stream(php_stream *src, php_stream *dest, size_t maxlen, size_t *len STREAMS_DC TSRMLS_DC)
-{
-	size_t ret = php_stream_copy_to_stream(src, dest, maxlen);
-	if (len) {
-		*len = ret;
-	}
-	if (ret) {
-		return SUCCESS;
-	}
-	return FAILURE;
-}
-#else
-# define phar_stream_copy_to_stream(src, dest, maxlen, len)	_php_stream_copy_to_stream_ex((src), (dest), (maxlen), (len) STREAMS_CC TSRMLS_CC)
-
-#endif
-
-#if PHP_VERSION_ID >= 60000
-typedef zstr phar_zstr;
-#define PHAR_STR(a, b)	\
-	spprintf(&b, 0, "%s", a.s);
-#define PHAR_ZSTR(a, b)	\
-	b = ZSTR(a);
-#define PHAR_STR_FREE(a) \
-	efree(a);
-static inline int phar_make_unicode(zstr *c_var, char *arKey, uint nKeyLength TSRMLS_DC)
-{
-	int c_var_len;
-	UConverter *conv = ZEND_U_CONVERTER(UG(runtime_encoding_conv));
-
-	c_var->u = NULL;
-	if (zend_string_to_unicode(conv, &c_var->u, &c_var_len, arKey, nKeyLength TSRMLS_CC) == FAILURE) {
-
-		if (c_var->u) {
-			efree(c_var->u);
-		}
-		return 0;
-
-	}
-	return c_var_len;
-}
-static inline int phar_find_key(HashTable *_SERVER, char *key, int len, void **stuff TSRMLS_DC)
-{
-	if (SUCCESS == zend_hash_find(_SERVER, key, len, stuff)) {
-		return 1;
-	} else {
-		int s = len;
-		zstr var;
-		s = phar_make_unicode(&var, key, len TSRMLS_CC);
-		if (SUCCESS == zend_u_hash_find(_SERVER, IS_UNICODE, var, s, stuff)) {
-			efree(var.u);
-			return 1;
-		}
-		efree(var.u);
-		return 0;
-	}
-}
-#else
-typedef char *phar_zstr;
-#define PHAR_STR(a, b)	\
-	b = a;
-#define PHAR_ZSTR(a, b)	\
-	b = a;
-#define PHAR_STR_FREE(a)
 #endif
 
 BEGIN_EXTERN_C()
@@ -622,7 +530,7 @@ static inline void phar_set_inode(phar_entry_info *entry TSRMLS_DC) /* {{{ */
 	tmp_len = entry->filename_len + entry->phar->fname_len;
 	memcpy(tmp, entry->phar->fname, entry->phar->fname_len);
 	memcpy(tmp + entry->phar->fname_len, entry->filename, entry->filename_len);
-	entry->inode = (unsigned short)zend_get_hash_value(tmp, tmp_len);
+	entry->inode = (unsigned short)zend_hash_func(tmp, tmp_len);
 }
 /* }}} */
 
@@ -654,9 +562,9 @@ int phar_mount_entry(phar_archive_data *phar, char *filename, int filename_len, 
 char *phar_find_in_include_path(char *file, int file_len, phar_archive_data **pphar TSRMLS_DC);
 char *phar_fix_filepath(char *path, int *new_len, int use_cwd TSRMLS_DC);
 phar_entry_info * phar_open_jit(phar_archive_data *phar, phar_entry_info *entry, char **error TSRMLS_DC);
-int phar_parse_metadata(char **buffer, zval **metadata, int zip_metadata_len TSRMLS_DC);
-void destroy_phar_manifest_entry(void *pDest);
-int phar_seek_efp(phar_entry_info *entry, off_t offset, int whence, off_t position, int follow_links TSRMLS_DC);
+int phar_parse_metadata(char **buffer, zval *metadata, int zip_metadata_len TSRMLS_DC);
+void destroy_phar_manifest_entry(zval *zv);
+int phar_seek_efp(phar_entry_info *entry, zend_off_t offset, int whence, zend_off_t position, int follow_links TSRMLS_DC);
 php_stream *phar_get_efp(phar_entry_info *entry, int follow_links TSRMLS_DC);
 int phar_copy_entry_fp(phar_entry_info *source, phar_entry_info *dest, char **error TSRMLS_DC);
 int phar_open_entry_fp(phar_entry_info *entry, char **error, int follow_links TSRMLS_DC);
@@ -670,12 +578,12 @@ int phar_copy_on_write(phar_archive_data **pphar TSRMLS_DC);
 int phar_is_tar(char *buf, char *fname);
 int phar_parse_tarfile(php_stream* fp, char *fname, int fname_len, char *alias, int alias_len, phar_archive_data** pphar, int is_data, php_uint32 compression, char **error TSRMLS_DC);
 int phar_open_or_create_tar(char *fname, int fname_len, char *alias, int alias_len, int is_data, int options, phar_archive_data** pphar, char **error TSRMLS_DC);
-int phar_tar_flush(phar_archive_data *phar, char *user_stub, long len, int defaultstub, char **error TSRMLS_DC);
+int phar_tar_flush(phar_archive_data *phar, char *user_stub, zend_long len, int defaultstub, char **error TSRMLS_DC);
 
 /* zip functions in zip.c */
 int phar_parse_zipfile(php_stream *fp, char *fname, int fname_len, char *alias, int alias_len, phar_archive_data** pphar, char **error TSRMLS_DC);
 int phar_open_or_create_zip(char *fname, int fname_len, char *alias, int alias_len, int is_data, int options, phar_archive_data** pphar, char **error TSRMLS_DC);
-int phar_zip_flush(phar_archive_data *archive, char *user_stub, long len, int defaultstub, char **error TSRMLS_DC);
+int phar_zip_flush(phar_archive_data *archive, char *user_stub, zend_long len, int defaultstub, char **error TSRMLS_DC);
 
 #ifdef PHAR_MAIN
 static int phar_open_from_fp(php_stream* fp, char *fname, int fname_len, char *alias, int alias_len, int options, phar_archive_data** pphar, int is_data, char **error TSRMLS_DC);
@@ -690,11 +598,11 @@ int phar_entry_delref(phar_entry_data *idata TSRMLS_DC);
 
 phar_entry_info *phar_get_entry_info(phar_archive_data *phar, char *path, int path_len, char **error, int security TSRMLS_DC);
 phar_entry_info *phar_get_entry_info_dir(phar_archive_data *phar, char *path, int path_len, char dir, char **error, int security TSRMLS_DC);
-phar_entry_data *phar_get_or_create_entry_data(char *fname, int fname_len, char *path, int path_len, char *mode, char allow_dir, char **error, int security TSRMLS_DC);
-int phar_get_entry_data(phar_entry_data **ret, char *fname, int fname_len, char *path, int path_len, char *mode, char allow_dir, char **error, int security TSRMLS_DC);
-int phar_flush(phar_archive_data *archive, char *user_stub, long len, int convert, char **error TSRMLS_DC);
+phar_entry_data *phar_get_or_create_entry_data(char *fname, int fname_len, char *path, int path_len, const char *mode, char allow_dir, char **error, int security TSRMLS_DC);
+int phar_get_entry_data(phar_entry_data **ret, char *fname, int fname_len, char *path, int path_len, const char *mode, char allow_dir, char **error, int security TSRMLS_DC);
+int phar_flush(phar_archive_data *archive, char *user_stub, zend_long len, int convert, char **error TSRMLS_DC);
 int phar_detect_phar_fname_ext(const char *filename, int filename_len, const char **ext_str, int *ext_len, int executable, int for_create, int is_complete TSRMLS_DC);
-int phar_split_fname(char *filename, int filename_len, char **arch, int *arch_len, char **entry, int *entry_len, int executable, int for_create TSRMLS_DC);
+int phar_split_fname(const char *filename, int filename_len, char **arch, int *arch_len, char **entry, int *entry_len, int executable, int for_create TSRMLS_DC);
 
 typedef enum {
 	pcr_use_query,

@@ -1,8 +1,8 @@
 /* 
    +----------------------------------------------------------------------+
-   | PHP Version 5                                                        |
+   | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1997-2013 The PHP Group                                |
+   | Copyright (c) 1997-2014 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -40,18 +40,15 @@ PHPAPI void php_request_shutdown_for_hook(void *dummy);
 PHPAPI int php_register_extensions(zend_module_entry **ptr, int count TSRMLS_DC);
 
 PHPAPI int php_execute_script(zend_file_handle *primary_file TSRMLS_DC);
-PHPAPI int php_execute_simple_script(zend_file_handle *primary_file, zval **ret TSRMLS_DC);
+PHPAPI int php_execute_simple_script(zend_file_handle *primary_file, zval *ret TSRMLS_DC);
 PHPAPI int php_handle_special_queries(TSRMLS_D);
 PHPAPI int php_lint_script(zend_file_handle *file TSRMLS_DC);
 
 PHPAPI void php_handle_aborted_connection(void);
 PHPAPI int php_handle_auth_data(const char *auth TSRMLS_DC);
 
-PHPAPI void php_html_puts(const char *str, uint siz TSRMLS_DC);
+PHPAPI void php_html_puts(const char *str, size_t siz TSRMLS_DC);
 PHPAPI int php_stream_open_for_zend_ex(const char *filename, zend_file_handle *handle, int mode TSRMLS_DC);
-
-extern void php_call_shutdown_functions(TSRMLS_D);
-extern void php_free_shutdown_functions(TSRMLS_D);
 
 /* environment module */
 extern int php_init_environ(void);

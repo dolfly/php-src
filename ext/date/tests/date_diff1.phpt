@@ -14,7 +14,7 @@ var_dump($int);
 --EXPECT--
 object(DateTime)#1 (3) {
   ["date"]=>
-  string(19) "2010-10-04 02:18:48"
+  string(26) "2010-10-04 02:18:48.000000"
   ["timezone_type"]=>
   int(2)
   ["timezone"]=>
@@ -22,7 +22,7 @@ object(DateTime)#1 (3) {
 }
 object(DateTime)#2 (3) {
   ["date"]=>
-  string(19) "2010-11-06 18:38:28"
+  string(26) "2010-11-06 18:38:28.000000"
   ["timezone_type"]=>
   int(2)
   ["timezone"]=>
@@ -50,11 +50,11 @@ object(DateInterval)#3 (15) {
   ["invert"]=>
   int(0)
   ["days"]=>
-  string(2) "33"
+  int(33)
   ["special_type"]=>
   int(0)
   ["special_amount"]=>
-  string(1) "0"
+  int(0)
   ["have_weekday_relative"]=>
   int(0)
   ["have_special_relative"]=>

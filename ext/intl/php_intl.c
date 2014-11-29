@@ -1,6 +1,6 @@
 /*
    +----------------------------------------------------------------------+
-   | PHP Version 5                                                        |
+   | PHP Version 7                                                        |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -445,7 +445,7 @@ ZEND_BEGIN_ARG_INFO_EX( arginfo_tz_idarg_static, 0, 0, 1 )
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX( arginfo_tz_from_date_time_zone, 0, 0, 1 )
-	ZEND_ARG_OBJ_INFO( 0, dateTimeZone, IntlDateTimeZone, 0 )
+	ZEND_ARG_OBJ_INFO( 0, dateTimeZone, DateTimeZone, 0 )
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX( arginfo_tz_create_enumeration, 0, 0, 0 )
@@ -588,6 +588,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX( ainfo_cal_set_lenient, 0, 0, 2 )
 	ZEND_ARG_OBJ_INFO( 0, calendar, IntlCalendar, 0 )
 	ZEND_ARG_INFO( 0, isLenient )
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX( ainfo_cal_set_minimal_days_in_first_week, 0, 0, 2 )
+	ZEND_ARG_OBJ_INFO( 0, calendar, IntlCalendar, 0 )
+	ZEND_ARG_INFO( 0, numberOfDays )
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ainfo_cal_from_date_time, 0, 0, 1)
@@ -828,6 +833,7 @@ zend_function_entry intl_functions[] = {
 #endif
 	PHP_FE( intlcal_set_first_day_of_week, ainfo_cal_dow )
 	PHP_FE( intlcal_set_lenient, ainfo_cal_set_lenient )
+	PHP_FE( intlcal_set_minimal_days_in_first_week, ainfo_cal_set_minimal_days_in_first_week )
 	PHP_FE( intlcal_equals, ainfo_cal_other_cal )
 	PHP_FE( intlcal_from_date_time, ainfo_cal_from_date_time )
 	PHP_FE( intlcal_to_date_time, ainfo_cal_only_cal )
@@ -904,7 +910,7 @@ PHP_MINIT_FUNCTION( intl )
 	/* For the default locale php.ini setting */
 	REGISTER_INI_ENTRIES();
 
-	REGISTER_LONG_CONSTANT("INTL_MAX_LOCALE_LEN", INTL_MAX_LOCALE_LEN, CONST_CS);
+	REGISTER_LONG_CONSTANT("INTL_MAX_LOCALE_LEN", INTL_MAX_LOCALE_LEN, CONST_PERSISTENT | CONST_CS);
 	REGISTER_STRING_CONSTANT("INTL_ICU_VERSION", U_ICU_VERSION, CONST_PERSISTENT | CONST_CS);
 #ifdef U_ICU_DATA_VERSION
 	REGISTER_STRING_CONSTANT("INTL_ICU_DATA_VERSION", U_ICU_DATA_VERSION, CONST_PERSISTENT | CONST_CS);
@@ -1026,8 +1032,8 @@ PHP_RINIT_FUNCTION( intl )
  */
 PHP_RSHUTDOWN_FUNCTION( intl )
 {
-	if(INTL_G(current_collator)) {
-		INTL_G(current_collator) = NULL;
+	if(!Z_ISUNDEF(INTL_G(current_collator))) {
+		ZVAL_UNDEF(&INTL_G(current_collator));
 	}
 	if (INTL_G(grapheme_iterator)) {
 		grapheme_close_global_iterator( TSRMLS_C );

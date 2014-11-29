@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2013 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2014 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        | 
@@ -35,7 +35,7 @@ typedef struct _zend_lex_state {
 
 	zend_file_handle *in;
 	uint lineno;
-	char *filename;
+	zend_string *filename;
 
 	/* original (unfiltered) script */
 	unsigned char *script_org;
@@ -45,7 +45,7 @@ typedef struct _zend_lex_state {
 	unsigned char *script_filtered;
 	size_t script_filtered_size;
 
-	/* input/ouput filters */
+	/* input/output filters */
 	zend_encoding_filter input_filter;
 	zend_encoding_filter output_filter;
 	const zend_encoding *script_encoding;

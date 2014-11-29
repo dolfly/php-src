@@ -3,7 +3,7 @@ dnl $Id$
 dnl
 
 PHP_ARG_ENABLE(opcache, whether to enable Zend OPcache support,
-[  --enable-opcache Enable Zend OPcache support], yes)
+[  --enable-opcache        Enable Zend OPcache support], yes)
 
 if test "$PHP_OPCACHE" != "no"; then
 
@@ -325,7 +325,44 @@ int main() {
     AC_DEFINE(HAVE_SHM_MMAP_FILE, 1, [Define if you have mmap() SHM support])
     msg=yes,msg=no,msg=no)
   AC_MSG_RESULT([$msg])
-  
+
+flock_type=unknown
+AC_MSG_CHECKING("whether flock struct is linux ordered")
+AC_TRY_RUN([
+  #include <fcntl.h>
+  struct flock lock = { 1, 2, 3, 4, 5 };
+  int main() { 
+    if(lock.l_type == 1 && lock.l_whence == 2 && lock.l_start == 3 && lock.l_len == 4) {
+		return 0;
+    }
+    return 1;
+  } 
+], [
+	flock_type=linux
+    AC_DEFINE([HAVE_FLOCK_LINUX], [], [Struct flock is Linux-type])
+    AC_MSG_RESULT("yes")
+], AC_MSG_RESULT("no") )
+
+AC_MSG_CHECKING("whether flock struct is BSD ordered")
+AC_TRY_RUN([
+  #include <fcntl.h>
+  struct flock lock = { 1, 2, 3, 4, 5 };
+  int main() { 
+    if(lock.l_start == 1 && lock.l_len == 2 && lock.l_type == 4 && lock.l_whence == 5) {
+		return 0;
+    }
+    return 1;
+  } 
+], [
+	flock_type=bsd
+    AC_DEFINE([HAVE_FLOCK_BSD], [], [Struct flock is BSD-type]) 
+    AC_MSG_RESULT("yes")
+], AC_MSG_RESULT("no") )
+
+if test "$flock_type" == "unknown"; then
+	AC_MSG_ERROR([Don't know how to define struct flock on this system[,] set --enable-opcache=no])
+fi
+
   PHP_NEW_EXTENSION(opcache,
 	ZendAccelerator.c \
 	zend_accelerator_blacklist.c \
@@ -339,7 +376,15 @@ int main() {
 	shared_alloc_shm.c \
 	shared_alloc_mmap.c \
 	shared_alloc_posix.c \
-	Optimizer/zend_optimizer.c,
+	Optimizer/zend_optimizer.c \
+	Optimizer/pass1_5.c \
+	Optimizer/pass2.c \
+	Optimizer/pass3.c \
+	Optimizer/optimize_func_calls.c \
+	Optimizer/block_pass.c \
+	Optimizer/optimize_temp_vars_5.c \
+	Optimizer/nop_removal.c \
+	Optimizer/compact_literals.c,
 	shared,,,,yes)
 
   PHP_ADD_BUILD_DIR([$ext_builddir/Optimizer], 1)

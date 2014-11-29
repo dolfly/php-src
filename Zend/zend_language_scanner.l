@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | Zend Engine                                                          |
    +----------------------------------------------------------------------+
-   | Copyright (c) 1998-2013 Zend Technologies Ltd. (http://www.zend.com) |
+   | Copyright (c) 1998-2014 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -47,7 +47,7 @@
 #include "zend_API.h"
 #include "zend_strtod.h"
 #include "zend_exceptions.h"
-#include "tsrm_virtual_cwd.h"
+#include "zend_virtual_cwd.h"
 #include "tsrm_config_common.h"
 
 #define YYCTYPE   unsigned char
@@ -112,9 +112,9 @@ do {																			\
 	} \
 }
 
-/* To save initial string length after scanning to first variable, CG(doc_comment_len) can be reused */
-#define SET_DOUBLE_QUOTES_SCANNED_LENGTH(len) CG(doc_comment_len) = (len)
-#define GET_DOUBLE_QUOTES_SCANNED_LENGTH()    CG(doc_comment_len)
+/* To save initial string length after scanning to first variable */
+#define SET_DOUBLE_QUOTES_SCANNED_LENGTH(len) SCNG(scanned_string_len) = (len)
+#define GET_DOUBLE_QUOTES_SCANNED_LENGTH()    SCNG(scanned_string_len)
 
 #define IS_LABEL_START(c) (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_' || (c) >= 0x7F)
 
@@ -126,7 +126,7 @@ BEGIN_EXTERN_C()
 static size_t encoding_filter_script_to_internal(unsigned char **to, size_t *to_length, const unsigned char *from, size_t from_length TSRMLS_DC)
 {
 	const zend_encoding *internal_encoding = zend_multibyte_get_internal_encoding(TSRMLS_C);
-	assert(internal_encoding && zend_multibyte_check_lexer_compatibility(internal_encoding));
+	ZEND_ASSERT(internal_encoding);
 	return zend_multibyte_encoding_converter(to, to_length, from, from_length, internal_encoding, LANG_SCNG(script_encoding) TSRMLS_CC);
 }
 
@@ -144,7 +144,7 @@ LANG_SCNG(script_encoding), zend_multibyte_encoding_utf8 TSRMLS_CC);
 static size_t encoding_filter_intermediate_to_internal(unsigned char **to, size_t *to_length, const unsigned char *from, size_t from_length TSRMLS_DC)
 {
 	const zend_encoding *internal_encoding = zend_multibyte_get_internal_encoding(TSRMLS_C);
-	assert(internal_encoding && zend_multibyte_check_lexer_compatibility(internal_encoding));
+	ZEND_ASSERT(internal_encoding);
 	return zend_multibyte_encoding_converter(to, to_length, from, from_length,
 internal_encoding, zend_multibyte_encoding_utf8 TSRMLS_CC);
 }
@@ -152,7 +152,7 @@ internal_encoding, zend_multibyte_encoding_utf8 TSRMLS_CC);
 
 static void _yy_push_state(int new_state TSRMLS_DC)
 {
-	zend_stack_push(&SCNG(state_stack), (void *) &YYGETCONDITION(), sizeof(int));
+	zend_stack_push(&SCNG(state_stack), (void *) &YYGETCONDITION());
 	YYSETCONDITION(new_state);
 }
 
@@ -160,8 +160,7 @@ static void _yy_push_state(int new_state TSRMLS_DC)
 
 static void yy_pop_state(TSRMLS_D)
 {
-	int *stack_state;
-	zend_stack_top(&SCNG(state_stack), (void **) &stack_state);
+	int *stack_state = zend_stack_top(&SCNG(state_stack));
 	YYSETCONDITION(*stack_state);
 	zend_stack_del_top(&SCNG(state_stack));
 }
@@ -179,8 +178,7 @@ void startup_scanner(TSRMLS_D)
 {
 	CG(parse_error) = 0;
 	CG(doc_comment) = NULL;
-	CG(doc_comment_len) = 0;
-	zend_stack_init(&SCNG(state_stack));
+	zend_stack_init(&SCNG(state_stack), sizeof(int));
 	zend_ptr_stack_init(&SCNG(heredoc_label_stack));
 }
 
@@ -207,7 +205,7 @@ ZEND_API void zend_save_lexical_state(zend_lex_state *lex_state TSRMLS_DC)
 	lex_state->yy_limit  = SCNG(yy_limit);
 
 	lex_state->state_stack = SCNG(state_stack);
-	zend_stack_init(&SCNG(state_stack));
+	zend_stack_init(&SCNG(state_stack), sizeof(int));
 
 	lex_state->heredoc_label_stack = SCNG(heredoc_label_stack);
 	zend_ptr_stack_init(&SCNG(heredoc_label_stack));
@@ -258,6 +256,8 @@ ZEND_API void zend_restore_lexical_state(zend_lex_state *lex_state TSRMLS_DC)
 	SCNG(input_filter) = lex_state->input_filter;
 	SCNG(output_filter) = lex_state->output_filter;
 	SCNG(script_encoding) = lex_state->script_encoding;
+
+	RESET_DOC_COMMENT();
 }
 
 ZEND_API void zend_destroy_file_handle(zend_file_handle *file_handle TSRMLS_DC)
@@ -284,7 +284,8 @@ static const zend_encoding *zend_multibyte_detect_utf_encoding(const unsigned ch
 
 	/* utf-16 or utf-32? */
 	p = script;
-	while ((p-script) < script_size) {
+	assert(p >= script);
+	while ((size_t)(p-script) < script_size) {
 		p = memchr(p, 0, script_size-(p-script)-2);
 		if (!p) {
 			break;
@@ -300,7 +301,8 @@ static const zend_encoding *zend_multibyte_detect_utf_encoding(const unsigned ch
 
 	/* BE or LE? */
 	p = script;
-	while ((p-script) < script_size) {
+	assert(p >= script);
+	while ((size_t)(p-script) < script_size) {
 		if (*p == '\0' && *(p+wchar_size-1) != '\0') {
 			/* BE */
 			le = 0;
@@ -477,6 +479,7 @@ ZEND_API int open_file_for_scanning(zend_file_handle *file_handle TSRMLS_DC)
 	const char *file_path = NULL;
 	char *buf;
 	size_t size, offset = 0;
+	zend_string *compiled_filename;
 
 	/* The shebang line was read, get the current position to obtain the buffer start */
 	if (CG(start_lineno) == 2 && file_handle->type == ZEND_HANDLE_FP && file_handle->handle.fp) {
@@ -519,7 +522,7 @@ ZEND_API int open_file_for_scanning(zend_file_handle *file_handle TSRMLS_DC)
 			}
 		}
 		SCNG(yy_start) = (unsigned char *)buf - offset;
-		yy_scan_buffer(buf, size TSRMLS_CC);
+		yy_scan_buffer(buf, (unsigned int)size TSRMLS_CC);
 	} else {
 		zend_error_noreturn(E_COMPILE_ERROR, "zend_stream_mmap() failed");
 	}
@@ -532,7 +535,9 @@ ZEND_API int open_file_for_scanning(zend_file_handle *file_handle TSRMLS_DC)
 		file_path = file_handle->filename;
 	}
 
-	zend_set_compiled_filename(file_path TSRMLS_CC);
+	compiled_filename = zend_string_init(file_path, strlen(file_path), 0);
+	zend_set_compiled_filename(compiled_filename TSRMLS_CC);
+	zend_string_release(compiled_filename);
 
 	if (CG(start_lineno)) {
 		CG(zend_lineno) = CG(start_lineno);
@@ -541,6 +546,7 @@ ZEND_API int open_file_for_scanning(zend_file_handle *file_handle TSRMLS_DC)
 		CG(zend_lineno) = 1;
 	}
 
+	RESET_DOC_COMMENT();
 	CG(increment_lineno) = 0;
 	return SUCCESS;
 }
@@ -552,21 +558,14 @@ ZEND_API zend_op_array *compile_file(zend_file_handle *file_handle, int type TSR
 	zend_lex_state original_lex_state;
 	zend_op_array *op_array = (zend_op_array *) emalloc(sizeof(zend_op_array));
 	zend_op_array *original_active_op_array = CG(active_op_array);
-	zend_op_array *retval=NULL;
 	int compiler_result;
 	zend_bool compilation_successful=0;
-	znode retval_znode;
+	zval retval_zv;
 	zend_bool original_in_compilation = CG(in_compilation);
 
-	retval_znode.op_type = IS_CONST;
-	retval_znode.u.constant.type = IS_LONG;
-	retval_znode.u.constant.value.lval = 1;
-	Z_UNSET_ISREF(retval_znode.u.constant);
-	Z_SET_REFCOUNT(retval_znode.u.constant, 1);
+	ZVAL_LONG(&retval_zv, 1);
 
 	zend_save_lexical_state(&original_lex_state TSRMLS_CC);
-
-	retval = op_array; /* success oriented */
 
 	if (open_file_for_scanning(file_handle TSRMLS_CC)==FAILURE) {
 		if (type==ZEND_REQUIRE) {
@@ -580,29 +579,33 @@ ZEND_API zend_op_array *compile_file(zend_file_handle *file_handle, int type TSR
 		init_op_array(op_array, ZEND_USER_FUNCTION, INITIAL_OP_ARRAY_SIZE TSRMLS_CC);
 		CG(in_compilation) = 1;
 		CG(active_op_array) = op_array;
-		zend_stack_push(&CG(context_stack), (void *) &CG(context), sizeof(CG(context)));
+		zend_stack_push(&CG(context_stack), (void *) &CG(context));
 		zend_init_compiler_context(TSRMLS_C);
+		CG(ast_arena) = zend_arena_create(1024 * 32);
 		compiler_result = zendparse(TSRMLS_C);
-		zend_do_return(&retval_znode, 0 TSRMLS_CC);
-		CG(in_compilation) = original_in_compilation;
-		if (compiler_result==1) { /* parser error */
+		if (compiler_result != 0) { /* parser error */
 			zend_bailout();
 		}
+		zend_compile_top_stmt(CG(ast) TSRMLS_CC);
+		zend_ast_destroy(CG(ast));
+		zend_arena_destroy(CG(ast_arena));
+		zend_do_end_compilation(TSRMLS_C);
+		zend_emit_final_return(&retval_zv TSRMLS_CC);
+		CG(in_compilation) = original_in_compilation;
 		compilation_successful=1;
 	}
 
-	if (retval) {
-		CG(active_op_array) = original_active_op_array;
-		if (compilation_successful) {
-			pass_two(op_array TSRMLS_CC);
-			zend_release_labels(TSRMLS_C);
-		} else {
-			efree(op_array);
-			retval = NULL;
-		}
+	CG(active_op_array) = original_active_op_array;
+	if (compilation_successful) {
+		pass_two(op_array TSRMLS_CC);
+		zend_release_labels(0 TSRMLS_CC);
+	} else {
+		efree_size(op_array, sizeof(zend_op_array));
+		op_array = NULL;
 	}
+
 	zend_restore_lexical_state(&original_lex_state TSRMLS_CC);
-	return retval;
+	return op_array;
 }
 
 
@@ -613,13 +616,13 @@ zend_op_array *compile_filename(int type, zval *filename TSRMLS_DC)
 	zend_op_array *retval;
 	char *opened_path = NULL;
 
-	if (filename->type != IS_STRING) {
+	if (Z_TYPE_P(filename) != IS_STRING) {
 		tmp = *filename;
 		zval_copy_ctor(&tmp);
 		convert_to_string(&tmp);
 		filename = &tmp;
 	}
-	file_handle.filename = filename->value.str.val;
+	file_handle.filename = Z_STRVAL_P(filename);
 	file_handle.free_filename = 0;
 	file_handle.type = ZEND_HANDLE_FILENAME;
 	file_handle.opened_path = NULL;
@@ -627,13 +630,11 @@ zend_op_array *compile_filename(int type, zval *filename TSRMLS_DC)
 
 	retval = zend_compile_file(&file_handle, type TSRMLS_CC);
 	if (retval && file_handle.handle.stream.handle) {
-		int dummy = 1;
-
 		if (!file_handle.opened_path) {
-			file_handle.opened_path = opened_path = estrndup(filename->value.str.val, filename->value.str.len);
+			file_handle.opened_path = opened_path = estrndup(Z_STRVAL_P(filename), Z_STRLEN_P(filename));
 		}
 
-		zend_hash_add(&EG(included_files), file_handle.opened_path, strlen(file_handle.opened_path)+1, (void *)&dummy, sizeof(int), NULL);
+		zend_hash_str_add_empty_element(&EG(included_files), file_handle.opened_path, strlen(file_handle.opened_path));
 
 		if (opened_path) {
 			efree(opened_path);
@@ -650,24 +651,20 @@ zend_op_array *compile_filename(int type, zval *filename TSRMLS_DC)
 ZEND_API int zend_prepare_string_for_scanning(zval *str, char *filename TSRMLS_DC)
 {
 	char *buf;
-	size_t size;
+	size_t size, old_len;
+	zend_string *new_compiled_filename;
 
-	/* enforce two trailing NULLs for flex... */
-	if (IS_INTERNED(str->value.str.val)) {
-		char *tmp = safe_emalloc(1, str->value.str.len, ZEND_MMAP_AHEAD);
-		memcpy(tmp, str->value.str.val, str->value.str.len + ZEND_MMAP_AHEAD);
-		str->value.str.val = tmp;
-	} else {
-		str->value.str.val = safe_erealloc(str->value.str.val, 1, str->value.str.len, ZEND_MMAP_AHEAD);
-	}
-
-	memset(str->value.str.val + str->value.str.len, 0, ZEND_MMAP_AHEAD);
+	/* enforce ZEND_MMAP_AHEAD trailing NULLs for flex... */
+	old_len = Z_STRLEN_P(str);
+	Z_STR_P(str) = zend_string_realloc(Z_STR_P(str), old_len + ZEND_MMAP_AHEAD, 0);
+	Z_TYPE_INFO_P(str) = IS_STRING_EX;
+	memset(Z_STRVAL_P(str) + old_len, 0, ZEND_MMAP_AHEAD + 1);
 
 	SCNG(yy_in) = NULL;
 	SCNG(yy_start) = NULL;
 
-	buf = str->value.str.val;
-	size = str->value.str.len;
+	buf = Z_STRVAL_P(str);
+	size = old_len;
 
 	if (CG(multibyte)) {
 		SCNG(script_org) = (unsigned char*)buf;
@@ -686,11 +683,14 @@ ZEND_API int zend_prepare_string_for_scanning(zval *str, char *filename TSRMLS_D
 		}
 	}
 
-	yy_scan_buffer(buf, size TSRMLS_CC);
+	yy_scan_buffer(buf, (unsigned int)size TSRMLS_CC);
 
-	zend_set_compiled_filename(filename TSRMLS_CC);
+	new_compiled_filename = zend_string_init(filename, strlen(filename), 0);
+	zend_set_compiled_filename(new_compiled_filename TSRMLS_CC);
+	zend_string_release(new_compiled_filename);
 	CG(zend_lineno) = 1;
 	CG(increment_lineno) = 0;
+	RESET_DOC_COMMENT();
 	return SUCCESS;
 }
 
@@ -720,64 +720,50 @@ ZEND_API size_t zend_get_scanned_file_offset(TSRMLS_D)
 zend_op_array *compile_string(zval *source_string, char *filename TSRMLS_DC)
 {
 	zend_lex_state original_lex_state;
-	zend_op_array *op_array = (zend_op_array *) emalloc(sizeof(zend_op_array));
-	zend_op_array *original_active_op_array = CG(active_op_array);
-	zend_op_array *retval;
+	zend_op_array *op_array = NULL;
 	zval tmp;
-	int compiler_result;
 	zend_bool original_in_compilation = CG(in_compilation);
 
-	if (source_string->value.str.len==0) {
-		efree(op_array);
+	if (Z_STRLEN_P(source_string)==0) {
 		return NULL;
 	}
 
-	CG(in_compilation) = 1;
-
-	tmp = *source_string;
-	zval_copy_ctor(&tmp);
+	ZVAL_DUP(&tmp, source_string);
 	convert_to_string(&tmp);
 	source_string = &tmp;
-
+	
+	CG(in_compilation) = 1;
 	zend_save_lexical_state(&original_lex_state TSRMLS_CC);
-	if (zend_prepare_string_for_scanning(source_string, filename TSRMLS_CC)==FAILURE) {
-		efree(op_array);
-		retval = NULL;
-	} else {
-		zend_bool orig_interactive = CG(interactive);
-
-		CG(interactive) = 0;
-		init_op_array(op_array, ZEND_EVAL_CODE, INITIAL_OP_ARRAY_SIZE TSRMLS_CC);
-		CG(interactive) = orig_interactive;
-		CG(active_op_array) = op_array;
-		zend_stack_push(&CG(context_stack), (void *) &CG(context), sizeof(CG(context)));
-		zend_init_compiler_context(TSRMLS_C);
+	if (zend_prepare_string_for_scanning(source_string, filename TSRMLS_CC) == SUCCESS) {
+		CG(ast) = NULL;
+		CG(ast_arena) = zend_arena_create(1024 * 32);
 		BEGIN(ST_IN_SCRIPTING);
-		compiler_result = zendparse(TSRMLS_C);
 
-		if (SCNG(script_filtered)) {
-			efree(SCNG(script_filtered));
-			SCNG(script_filtered) = NULL;
-		}
+		if (!zendparse(TSRMLS_C)) {
+			zend_op_array *original_active_op_array = CG(active_op_array);
+			op_array = emalloc(sizeof(zend_op_array));
+			init_op_array(op_array, ZEND_EVAL_CODE, INITIAL_OP_ARRAY_SIZE TSRMLS_CC);
+			CG(active_op_array) = op_array;
 
-		if (compiler_result==1) {
-			CG(active_op_array) = original_active_op_array;
-			CG(unclean_shutdown)=1;
-			destroy_op_array(op_array TSRMLS_CC);
-			efree(op_array);
-			retval = NULL;
-		} else {
-			zend_do_return(NULL, 0 TSRMLS_CC);
-			CG(active_op_array) = original_active_op_array;
+			zend_stack_push(&CG(context_stack), (void *) &CG(context));
+			zend_init_compiler_context(TSRMLS_C);
+			zend_compile_top_stmt(CG(ast) TSRMLS_CC);
+			zend_do_end_compilation(TSRMLS_C);
+			zend_emit_final_return(NULL TSRMLS_CC);
 			pass_two(op_array TSRMLS_CC);
-			zend_release_labels(TSRMLS_C);
-			retval = op_array;
+			zend_release_labels(0 TSRMLS_CC);
+
+			CG(active_op_array) = original_active_op_array;
 		}
+
+		zend_ast_destroy(CG(ast));
+		zend_arena_destroy(CG(ast_arena));
 	}
+
 	zend_restore_lexical_state(&original_lex_state TSRMLS_CC);
 	zval_dtor(&tmp);
 	CG(in_compilation) = original_in_compilation;
-	return retval;
+	return op_array;
 }
 
 
@@ -849,6 +835,9 @@ ZEND_API void zend_multibyte_yyinput_again(zend_encoding_filter old_input_filter
 			zend_error_noreturn(E_COMPILE_ERROR, "Could not convert the script from the detected "
 					"encoding \"%s\" to a compatible encoding", zend_multibyte_get_encoding_name(LANG_SCNG(script_encoding)));
 		}
+		if (SCNG(script_filtered)) {
+			efree(SCNG(script_filtered));
+		}
 		SCNG(script_filtered) = new_yy_start;
 		SCNG(script_filtered_size) = length;
 	}
@@ -856,20 +845,22 @@ ZEND_API void zend_multibyte_yyinput_again(zend_encoding_filter old_input_filter
 	SCNG(yy_cursor) = new_yy_start + (SCNG(yy_cursor) - SCNG(yy_start));
 	SCNG(yy_marker) = new_yy_start + (SCNG(yy_marker) - SCNG(yy_start));
 	SCNG(yy_text) = new_yy_start + (SCNG(yy_text) - SCNG(yy_start));
-	SCNG(yy_limit) = new_yy_start + (SCNG(yy_limit) - SCNG(yy_start));
+	SCNG(yy_limit) = new_yy_start + length;
 
 	SCNG(yy_start) = new_yy_start;
 }
 
 
+// TODO: avoid reallocation ???
 # define zend_copy_value(zendlval, yytext, yyleng) \
 	if (SCNG(output_filter)) { \
 		size_t sz = 0; \
-		SCNG(output_filter)((unsigned char **)&(zendlval->value.str.val), &sz, (unsigned char *)yytext, (size_t)yyleng TSRMLS_CC); \
-		zendlval->value.str.len = sz; \
+		char *s = NULL; \
+		SCNG(output_filter)((unsigned char **)&s, &sz, (unsigned char *)yytext, (size_t)yyleng TSRMLS_CC); \
+		ZVAL_STRINGL(zendlval, s, sz); \
+		efree(s); \
 	} else { \
-		zendlval->value.str.val = (char *) estrndup(yytext, yyleng); \
-		zendlval->value.str.len = yyleng; \
+		ZVAL_STRINGL(zendlval, yytext, yyleng); \
 	}
 
 static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quote_type TSRMLS_DC)
@@ -877,11 +868,11 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 	register char *s, *t;
 	char *end;
 
-	ZVAL_STRINGL(zendlval, str, len, 1);
+	ZVAL_STRINGL(zendlval, str, len);
 
 	/* convert escape sequences */
-	s = t = zendlval->value.str.val;
-	end = s+zendlval->value.str.len;
+	s = t = Z_STRVAL_P(zendlval);
+	end = s+Z_STRLEN_P(zendlval);
 	while (s<end) {
 		if (*s=='\\') {
 			s++;
@@ -893,23 +884,23 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 			switch(*s) {
 				case 'n':
 					*t++ = '\n';
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 'r':
 					*t++ = '\r';
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 't':
 					*t++ = '\t';
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 'f':
 					*t++ = '\f';
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 'v':
 					*t++ = '\v';
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 'e':
 #ifdef PHP_WIN32
@@ -917,7 +908,7 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 #else
 					*t++ = '\e';
 #endif
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case '"':
 				case '`':
@@ -929,22 +920,22 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 				case '\\':
 				case '$':
 					*t++ = *s;
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				case 'x':
 				case 'X':
 					if (ZEND_IS_HEX(*(s+1))) {
 						char hex_buf[3] = { 0, 0, 0 };
 
-						zendlval->value.str.len--; /* for the 'x' */
+						Z_STRLEN_P(zendlval)--; /* for the 'x' */
 
 						hex_buf[0] = *(++s);
-						zendlval->value.str.len--;
+						Z_STRLEN_P(zendlval)--;
 						if (ZEND_IS_HEX(*(s+1))) {
 							hex_buf[1] = *(++s);
-							zendlval->value.str.len--;
+							Z_STRLEN_P(zendlval)--;
 						}
-						*t++ = (char) strtol(hex_buf, NULL, 16);
+						*t++ = (char) ZEND_STRTOL(hex_buf, NULL, 16);
 					} else {
 						*t++ = '\\';
 						*t++ = *s;
@@ -956,16 +947,16 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 						char octal_buf[4] = { 0, 0, 0, 0 };
 
 						octal_buf[0] = *s;
-						zendlval->value.str.len--;
+						Z_STRLEN_P(zendlval)--;
 						if (ZEND_IS_OCT(*(s+1))) {
 							octal_buf[1] = *(++s);
-							zendlval->value.str.len--;
+							Z_STRLEN_P(zendlval)--;
 							if (ZEND_IS_OCT(*(s+1))) {
 								octal_buf[2] = *(++s);
-								zendlval->value.str.len--;
+								Z_STRLEN_P(zendlval)--;
 							}
 						}
-						*t++ = (char) strtol(octal_buf, NULL, 8);
+						*t++ = (char) ZEND_STRTOL(octal_buf, NULL, 8);
 					} else {
 						*t++ = '\\';
 						*t++ = *s;
@@ -984,10 +975,13 @@ static void zend_scan_escape_string(zval *zendlval, char *str, int len, char quo
 	*t = 0;
 	if (SCNG(output_filter)) {
 		size_t sz = 0;
-		s = zendlval->value.str.val;
-		SCNG(output_filter)((unsigned char **)&(zendlval->value.str.val), &sz, (unsigned char *)s, (size_t)zendlval->value.str.len TSRMLS_CC);
-		zendlval->value.str.len = sz;
-		efree(s);
+		unsigned char *str;
+		// TODO: avoid realocation ???
+		s = Z_STRVAL_P(zendlval);
+		SCNG(output_filter)(&str, &sz, (unsigned char *)s, (size_t)Z_STRLEN_P(zendlval) TSRMLS_CC);
+		zval_ptr_dtor(zendlval);
+		ZVAL_STRINGL(zendlval, (char *) str, sz);
+		efree(str);
 	}
 }
 
@@ -996,8 +990,6 @@ int lex_scan(zval *zendlval TSRMLS_DC)
 {
 restart:
 	SCNG(yy_text) = YYCURSOR;
-
-yymore_restart:
 
 /*!re2c
 re2c:yyfill:check = 0;
@@ -1015,7 +1007,6 @@ NEWLINE ("\r"|"\n"|"\r\n")
 
 /* compute yyleng before each rule */
 <!*> := yyleng = YYCURSOR - SCNG(yy_text);
-
 
 <ST_IN_SCRIPTING>"exit" {
 	return T_EXIT;
@@ -1179,9 +1170,6 @@ NEWLINE ("\r"|"\n"|"\r\n")
 }
 
 <ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY>{WHITESPACE}+ {
-	zendlval->value.str.val = yytext; /* no copying - intentional */
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
 	HANDLE_NEWLINES(yytext, yyleng);
 	return T_WHITESPACE;
 }
@@ -1193,7 +1181,6 @@ NEWLINE ("\r"|"\n"|"\r\n")
 <ST_LOOKING_FOR_PROPERTY>{LABEL} {
 	yy_pop_state(TSRMLS_C);
 	zend_copy_value(zendlval, yytext, yyleng);
-	zendlval->type = IS_STRING;
 	return T_STRING;
 }
 
@@ -1209,6 +1196,14 @@ NEWLINE ("\r"|"\n"|"\r\n")
 
 <ST_IN_SCRIPTING>"\\" {
 	return T_NS_SEPARATOR;
+}
+
+<ST_IN_SCRIPTING>"..." {
+	return T_ELLIPSIS;
+}
+
+<ST_IN_SCRIPTING>"??" {
+	return T_COALESCE;
 }
 
 <ST_IN_SCRIPTING>"new" {
@@ -1387,6 +1382,14 @@ NEWLINE ("\r"|"\n"|"\r\n")
 	return T_MUL_EQUAL;
 }
 
+<ST_IN_SCRIPTING>"*\*" {
+	return T_POW;
+}
+
+<ST_IN_SCRIPTING>"*\*=" {
+	return T_POW_EQUAL;
+}
+
 <ST_IN_SCRIPTING>"/=" {
 	return T_DIV_EQUAL;
 }
@@ -1476,7 +1479,6 @@ NEWLINE ("\r"|"\n"|"\r\n")
 <ST_LOOKING_FOR_VARNAME>{LABEL}[[}] {
 	yyless(yyleng - 1);
 	zend_copy_value(zendlval, yytext, yyleng);
-	zendlval->type = IS_STRING;
 	yy_pop_state(TSRMLS_C);
 	yy_push_state(ST_IN_SCRIPTING TSRMLS_CC);
 	return T_STRING_VARNAME;
@@ -1500,39 +1502,34 @@ NEWLINE ("\r"|"\n"|"\r\n")
 		--len;
 	}
 
-	if (len < SIZEOF_LONG * 8) {
+	if (len < SIZEOF_ZEND_LONG * 8) {
 		if (len == 0) {
-			zendlval->value.lval = 0;
+			ZVAL_LONG(zendlval, 0);
 		} else {
-			zendlval->value.lval = strtol(bin, NULL, 2);
+			ZVAL_LONG(zendlval, ZEND_STRTOL(bin, NULL, 2));
 		}
-		zendlval->type = IS_LONG;
 		return T_LNUMBER;
 	} else {
-		zendlval->value.dval = zend_bin_strtod(bin, NULL);
-		zendlval->type = IS_DOUBLE;
+		ZVAL_DOUBLE(zendlval, zend_bin_strtod(bin, NULL));
 		return T_DNUMBER;
 	}
 }
 
 <ST_IN_SCRIPTING>{LNUM} {
 	if (yyleng < MAX_LENGTH_OF_LONG - 1) { /* Won't overflow */
-		zendlval->value.lval = strtol(yytext, NULL, 0);
+		ZVAL_LONG(zendlval, ZEND_STRTOL(yytext, NULL, 0));
 	} else {
 		errno = 0;
-		zendlval->value.lval = strtol(yytext, NULL, 0);
+		ZVAL_LONG(zendlval, ZEND_STRTOL(yytext, NULL, 0));
 		if (errno == ERANGE) { /* Overflow */
 			if (yytext[0] == '0') { /* octal overflow */
-				zendlval->value.dval = zend_oct_strtod(yytext, NULL);
+				ZVAL_DOUBLE(zendlval, zend_oct_strtod(yytext, NULL));
 			} else {
-				zendlval->value.dval = zend_strtod(yytext, NULL);
+				ZVAL_DOUBLE(zendlval, zend_strtod(yytext, NULL));
 			}
-			zendlval->type = IS_DOUBLE;
 			return T_DNUMBER;
 		}
 	}
-
-	zendlval->type = IS_LONG;
 	return T_LNUMBER;
 }
 
@@ -1546,242 +1543,78 @@ NEWLINE ("\r"|"\n"|"\r\n")
 		len--;
 	}
 
-	if (len < SIZEOF_LONG * 2 || (len == SIZEOF_LONG * 2 && *hex <= '7')) {
+	if (len < SIZEOF_ZEND_LONG * 2 || (len == SIZEOF_ZEND_LONG * 2 && *hex <= '7')) {
 		if (len == 0) {
-			zendlval->value.lval = 0;
+			ZVAL_LONG(zendlval, 0);
 		} else {
-			zendlval->value.lval = strtol(hex, NULL, 16);
+			ZVAL_LONG(zendlval, ZEND_STRTOL(hex, NULL, 16));
 		}
-		zendlval->type = IS_LONG;
 		return T_LNUMBER;
 	} else {
-		zendlval->value.dval = zend_hex_strtod(hex, NULL);
-		zendlval->type = IS_DOUBLE;
+		ZVAL_DOUBLE(zendlval, zend_hex_strtod(hex, NULL));
 		return T_DNUMBER;
 	}
 }
 
 <ST_VAR_OFFSET>[0]|([1-9][0-9]*) { /* Offset could be treated as a long */
 	if (yyleng < MAX_LENGTH_OF_LONG - 1 || (yyleng == MAX_LENGTH_OF_LONG - 1 && strcmp(yytext, long_min_digits) < 0)) {
-		zendlval->value.lval = strtol(yytext, NULL, 10);
-		zendlval->type = IS_LONG;
+		ZVAL_LONG(zendlval, ZEND_STRTOL(yytext, NULL, 10));
 	} else {
-		zendlval->value.str.val = (char *)estrndup(yytext, yyleng);
-		zendlval->value.str.len = yyleng;
-		zendlval->type = IS_STRING;
+		ZVAL_STRINGL(zendlval, yytext, yyleng);
 	}
 	return T_NUM_STRING;
 }
 
 <ST_VAR_OFFSET>{LNUM}|{HNUM}|{BNUM} { /* Offset must be treated as a string */
-	zendlval->value.str.val = (char *)estrndup(yytext, yyleng);
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
+	ZVAL_STRINGL(zendlval, yytext, yyleng);
 	return T_NUM_STRING;
 }
 
 <ST_IN_SCRIPTING>{DNUM}|{EXPONENT_DNUM} {
-	zendlval->value.dval = zend_strtod(yytext, NULL);
-	zendlval->type = IS_DOUBLE;
+	ZVAL_DOUBLE(zendlval, zend_strtod(yytext, NULL));
 	return T_DNUMBER;
 }
 
 <ST_IN_SCRIPTING>"__CLASS__" {
-	const char *class_name = NULL;
-	
-	if (CG(active_class_entry)
-		&& (ZEND_ACC_TRAIT ==
-			(CG(active_class_entry)->ce_flags & ZEND_ACC_TRAIT))) {
-		/* We create a special __CLASS__ constant that is going to be resolved
-		   at run-time */
-		zendlval->value.str.len = sizeof("__CLASS__")-1;
-		zendlval->value.str.val = estrndup("__CLASS__", zendlval->value.str.len);
-		zendlval->type = IS_CONSTANT;
-	} else {
-		if (CG(active_class_entry)) {
-			class_name = CG(active_class_entry)->name;
-		}
-		
-		if (!class_name) {
-			class_name = "";
-		}
-		
-		zendlval->value.str.len = strlen(class_name);
-		zendlval->value.str.val = estrndup(class_name, zendlval->value.str.len);
-		zendlval->type = IS_STRING;
-	}
 	return T_CLASS_C;
 }
 
 <ST_IN_SCRIPTING>"__TRAIT__" {
-	const char *trait_name = NULL;
-	
-	if (CG(active_class_entry)
-		&& (ZEND_ACC_TRAIT == 
-			(CG(active_class_entry)->ce_flags & ZEND_ACC_TRAIT))) {
-		trait_name = CG(active_class_entry)->name;
-	}
-	
-	if (!trait_name) {
-		trait_name = "";
-	}
-	
-	zendlval->value.str.len = strlen(trait_name);
-	zendlval->value.str.val = estrndup(trait_name, zendlval->value.str.len);
-	zendlval->type = IS_STRING;
-	
 	return T_TRAIT_C;
 }
 
 <ST_IN_SCRIPTING>"__FUNCTION__" {
-	const char *func_name = NULL;
-
-	if (CG(active_op_array)) {
-		func_name = CG(active_op_array)->function_name;
-	}
-
-	if (!func_name) {
-		func_name = "";
-	}
-	zendlval->value.str.len = strlen(func_name);
-	zendlval->value.str.val = estrndup(func_name, zendlval->value.str.len);
-	zendlval->type = IS_STRING;
 	return T_FUNC_C;
 }
 
 <ST_IN_SCRIPTING>"__METHOD__" {
-	const char *class_name = CG(active_class_entry) ? CG(active_class_entry)->name : NULL;
-	const char *func_name = CG(active_op_array)? CG(active_op_array)->function_name : NULL;
-	size_t len = 0;
-
-	if (class_name) {
-		len += strlen(class_name) + 2;
-	}
-	if (func_name) {
-		len += strlen(func_name);
-	}
-
-	zendlval->value.str.len = zend_spprintf(&zendlval->value.str.val, 0, "%s%s%s",
-		class_name ? class_name : "",
-		class_name && func_name ? "::" : "",
-		func_name ? func_name : ""
-		);
-	zendlval->type = IS_STRING;
 	return T_METHOD_C;
 }
 
 <ST_IN_SCRIPTING>"__LINE__" {
-	zendlval->value.lval = CG(zend_lineno);
-	zendlval->type = IS_LONG;
 	return T_LINE;
 }
 
 <ST_IN_SCRIPTING>"__FILE__" {
-	char *filename = zend_get_compiled_filename(TSRMLS_C);
-
-	if (!filename) {
-		filename = "";
-	}
-	zendlval->value.str.len = strlen(filename);
-	zendlval->value.str.val = estrndup(filename, zendlval->value.str.len);
-	zendlval->type = IS_STRING;
 	return T_FILE;
 }
 
 <ST_IN_SCRIPTING>"__DIR__" {
-	char *filename = zend_get_compiled_filename(TSRMLS_C);
-	const size_t filename_len = strlen(filename);
-	char *dirname;
-
-	if (!filename) {
-		filename = "";
-	}
-
-	dirname = estrndup(filename, filename_len);
-	zend_dirname(dirname, filename_len);
-
-	if (strcmp(dirname, ".") == 0) {
-		dirname = erealloc(dirname, MAXPATHLEN);
-#if HAVE_GETCWD
-		VCWD_GETCWD(dirname, MAXPATHLEN);
-#elif HAVE_GETWD
-		VCWD_GETWD(dirname);
-#endif
-	}
-
-	zendlval->value.str.len = strlen(dirname);
-	zendlval->value.str.val = dirname;
-	zendlval->type = IS_STRING;
 	return T_DIR;
 }
 
 <ST_IN_SCRIPTING>"__NAMESPACE__" {
-	if (CG(current_namespace)) {
-		*zendlval = *CG(current_namespace);
-		zval_copy_ctor(zendlval);
-	} else {
-		ZVAL_EMPTY_STRING(zendlval);
-	}
 	return T_NS_C;
-}
-
-<INITIAL>"<script"{WHITESPACE}+"language"{WHITESPACE}*"="{WHITESPACE}*("php"|"\"php\""|"'php'"){WHITESPACE}*">" {
-	YYCTYPE *bracket = (YYCTYPE*)zend_memrchr(yytext, '<', yyleng - (sizeof("script language=php>") - 1));
-
-	if (bracket != SCNG(yy_text)) {
-		/* Handle previously scanned HTML, as possible <script> tags found are assumed to not be PHP's */
-		YYCURSOR = bracket;
-		goto inline_html;
-	}
-
-	HANDLE_NEWLINES(yytext, yyleng);
-	zendlval->value.str.val = yytext; /* no copying - intentional */
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
-	BEGIN(ST_IN_SCRIPTING);
-	return T_OPEN_TAG;
-}
-
-
-<INITIAL>"<%=" {
-	if (CG(asp_tags)) {
-		zendlval->value.str.val = yytext; /* no copying - intentional */
-		zendlval->value.str.len = yyleng;
-		zendlval->type = IS_STRING;
-		BEGIN(ST_IN_SCRIPTING);
-		return T_OPEN_TAG_WITH_ECHO;
-	} else {
-		goto inline_char_handler;
-	}
 }
 
 
 <INITIAL>"<?=" {
-	zendlval->value.str.val = yytext; /* no copying - intentional */
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
 	BEGIN(ST_IN_SCRIPTING);
 	return T_OPEN_TAG_WITH_ECHO;
 }
 
 
-<INITIAL>"<%" {
-	if (CG(asp_tags)) {
-		zendlval->value.str.val = yytext; /* no copying - intentional */
-		zendlval->value.str.len = yyleng;
-		zendlval->type = IS_STRING;
-		BEGIN(ST_IN_SCRIPTING);
-		return T_OPEN_TAG;
-	} else {
-		goto inline_char_handler;
-	}
-}
-
-
 <INITIAL>"<?php"([ \t]|{NEWLINE}) {
-	zendlval->value.str.val = yytext; /* no copying - intentional */
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
 	HANDLE_NEWLINE(yytext[yyleng-1]);
 	BEGIN(ST_IN_SCRIPTING);
 	return T_OPEN_TAG;
@@ -1790,9 +1623,6 @@ NEWLINE ("\r"|"\n"|"\r\n")
 
 <INITIAL>"<?" {
 	if (CG(short_tags)) {
-		zendlval->value.str.val = yytext; /* no copying - intentional */
-		zendlval->value.str.len = yyleng;
-		zendlval->type = IS_STRING;
 		BEGIN(ST_IN_SCRIPTING);
 		return T_OPEN_TAG;
 	} else {
@@ -1812,50 +1642,35 @@ inline_char_handler:
 
 		YYCURSOR = ptr ? ptr + 1 : YYLIMIT;
 
-		if (YYCURSOR < YYLIMIT) {
-			switch (*YYCURSOR) {
-				case '?':
-					if (CG(short_tags) || !strncasecmp((char*)YYCURSOR + 1, "php", 3) || (*(YYCURSOR + 1) == '=')) { /* Assume [ \t\n\r] follows "php" */
-						break;
-					}
-					continue;
-				case '%':
-					if (CG(asp_tags)) {
-						break;
-					}
-					continue;
-				case 's':
-				case 'S':
-					/* Probably NOT an opening PHP <script> tag, so don't end the HTML chunk yet
-					 * If it is, the PHP <script> tag rule checks for any HTML scanned before it */
-					YYCURSOR--;
-					yymore();
-				default:
-					continue;
-			}
-
-			YYCURSOR--;
+		if (YYCURSOR >= YYLIMIT) {
+			break;
 		}
 
-		break;
+		if (*YYCURSOR == '?') {
+			if (CG(short_tags) || !strncasecmp((char*)YYCURSOR + 1, "php", 3) || (*(YYCURSOR + 1) == '=')) { /* Assume [ \t\n\r] follows "php" */
+
+				YYCURSOR--;
+				break;
+			}
+		}
 	}
 
-inline_html:
 	yyleng = YYCURSOR - SCNG(yy_text);
 
 	if (SCNG(output_filter)) {
-		int readsize;
+		size_t readsize;
+		char *s = NULL;
 		size_t sz = 0;
-		readsize = SCNG(output_filter)((unsigned char **)&(zendlval->value.str.val), &sz, (unsigned char *)yytext, (size_t)yyleng TSRMLS_CC);
-		zendlval->value.str.len = sz;
+		// TODO: avoid reallocation ???
+		readsize = SCNG(output_filter)((unsigned char **)&s, &sz, (unsigned char *)yytext, (size_t)yyleng TSRMLS_CC);
+		ZVAL_STRINGL(zendlval, s, sz);
+		efree(s);
 		if (readsize < yyleng) {
 			yyless(readsize);
 		}
 	} else {
-	  zendlval->value.str.val = (char *) estrndup(yytext, yyleng);
-	  zendlval->value.str.len = yyleng;
+	  ZVAL_STRINGL(zendlval, yytext, yyleng);
 	}
-	zendlval->type = IS_STRING;
 	HANDLE_NEWLINES(yytext, yyleng);
 	return T_INLINE_HTML;
 }
@@ -1868,7 +1683,6 @@ inline_html:
 	yyless(yyleng - 3);
 	yy_push_state(ST_LOOKING_FOR_PROPERTY TSRMLS_CC);
 	zend_copy_value(zendlval, (yytext+1), (yyleng-1));
-	zendlval->type = IS_STRING;
 	return T_VARIABLE;
 }
 
@@ -1878,13 +1692,11 @@ inline_html:
 	yyless(yyleng - 1);
 	yy_push_state(ST_VAR_OFFSET TSRMLS_CC);
 	zend_copy_value(zendlval, (yytext+1), (yyleng-1));
-	zendlval->type = IS_STRING;
 	return T_VARIABLE;
 }
 
 <ST_IN_SCRIPTING,ST_DOUBLE_QUOTES,ST_HEREDOC,ST_BACKQUOTE,ST_VAR_OFFSET>"$"{LABEL} {
 	zend_copy_value(zendlval, (yytext+1), (yyleng-1));
-	zendlval->type = IS_STRING;
 	return T_VARIABLE;
 }
 
@@ -1902,12 +1714,12 @@ inline_html:
 	/* Invalid rule to return a more explicit parse error with proper line number */
 	yyless(0);
 	yy_pop_state(TSRMLS_C);
+	ZVAL_NULL(zendlval);
 	return T_ENCAPSED_AND_WHITESPACE;
 }
 
 <ST_IN_SCRIPTING,ST_VAR_OFFSET>{LABEL} {
 	zend_copy_value(zendlval, yytext, yyleng);
-	zendlval->type = IS_STRING;
 	return T_STRING;
 }
 
@@ -1923,11 +1735,6 @@ inline_html:
 			case '\n':
 				CG(zend_lineno)++;
 				break;
-			case '%':
-				if (!CG(asp_tags)) {
-					continue;
-				}
-				/* fall through */
 			case '?':
 				if (*YYCURSOR == '>') {
 					YYCURSOR--;
@@ -1972,34 +1779,16 @@ inline_html:
 	HANDLE_NEWLINES(yytext, yyleng);
 
 	if (doc_com) {
-		CG(doc_comment) = estrndup(yytext, yyleng);
-		CG(doc_comment_len) = yyleng;
+		CG(doc_comment) = zend_string_init(yytext, yyleng, 0);
 		return T_DOC_COMMENT;
 	}
 
 	return T_COMMENT;
 }
 
-<ST_IN_SCRIPTING>("?>"|"</script"{WHITESPACE}*">"){NEWLINE}? {
-	zendlval->value.str.val = yytext; /* no copying - intentional */
-	zendlval->value.str.len = yyleng;
-	zendlval->type = IS_STRING;
+<ST_IN_SCRIPTING>"?>"{NEWLINE}? {
 	BEGIN(INITIAL);
 	return T_CLOSE_TAG;  /* implicit ';' at php-end tag */
-}
-
-
-<ST_IN_SCRIPTING>"%>"{NEWLINE}? {
-	if (CG(asp_tags)) {
-		BEGIN(INITIAL);
-		zendlval->value.str.len = yyleng;
-		zendlval->type = IS_STRING;
-		zendlval->value.str.val = yytext; /* no copying - intentional */
-		return T_CLOSE_TAG;  /* implicit ';' at php-end tag */
-	} else {
-		yyless(1);
-		return yytext[0];
-	}
 }
 
 
@@ -2024,17 +1813,16 @@ inline_html:
 			/* Unclosed single quotes; treat similar to double quotes, but without a separate token
 			 * for ' (unrecognized by parser), instead of old flex fallback to "Unexpected character..."
 			 * rule, which continued in ST_IN_SCRIPTING state after the quote */
+			ZVAL_NULL(zendlval);
 			return T_ENCAPSED_AND_WHITESPACE;
 		}
 	}
 
-	zendlval->value.str.val = estrndup(yytext+bprefix+1, yyleng-bprefix-2);
-	zendlval->value.str.len = yyleng-bprefix-2;
-	zendlval->type = IS_STRING;
+	ZVAL_STRINGL(zendlval, yytext+bprefix+1, yyleng-bprefix-2);
 
 	/* convert escape sequences */
-	s = t = zendlval->value.str.val;
-	end = s+zendlval->value.str.len;
+	s = t = Z_STRVAL_P(zendlval);
+	end = s+Z_STRLEN_P(zendlval);
 	while (s<end) {
 		if (*s=='\\') {
 			s++;
@@ -2043,7 +1831,7 @@ inline_html:
 				case '\\':
 				case '\'':
 					*t++ = *s;
-					zendlval->value.str.len--;
+					Z_STRLEN_P(zendlval)--;
 					break;
 				default:
 					*t++ = '\\';
@@ -2063,9 +1851,11 @@ inline_html:
 
 	if (SCNG(output_filter)) {
 		size_t sz = 0;
-		s = zendlval->value.str.val;
-		SCNG(output_filter)((unsigned char **)&(zendlval->value.str.val), &sz, (unsigned char *)s, (size_t)zendlval->value.str.len TSRMLS_CC);
-		zendlval->value.str.len = sz;
+		char *str = NULL;
+		s = Z_STRVAL_P(zendlval);
+		// TODO: avoid reallocation ???
+		SCNG(output_filter)((unsigned char **)&str, &sz, (unsigned char *)s, (size_t)Z_STRLEN_P(zendlval) TSRMLS_CC);
+		ZVAL_STRINGL(zendlval, str, sz);
 		efree(s);
 	}
 	return T_CONSTANT_ENCAPSED_STRING;
@@ -2183,7 +1973,7 @@ inline_html:
 
 
 <ST_DOUBLE_QUOTES,ST_BACKQUOTE,ST_HEREDOC>"{$" {
-	zendlval->value.lval = (long) '{';
+	Z_LVAL_P(zendlval) = (zend_long) '{';
 	yy_push_state(ST_IN_SCRIPTING TSRMLS_CC);
 	yyless(1);
 	return T_CURLY_OPEN;
@@ -2419,7 +2209,6 @@ nowdoc_scan_done:
 	yyleng = YYCURSOR - SCNG(yy_text);
 
 	zend_copy_value(zendlval, yytext, yyleng - newline);
-	zendlval->type = IS_STRING;
 	HANDLE_NEWLINES(yytext, yyleng - newline);
 	return T_ENCAPSED_AND_WHITESPACE;
 }

@@ -703,11 +703,6 @@ PHP_METHOD(Phar, webPhar)
 			goto cleanup_fail;
 		}
 
-		if (Z_TYPE_P(rewrite_fci.retval) == IS_UNDEF || Z_TYPE(retval) == IS_UNDEF) {
-			zend_throw_exception_ex(phar_ce_PharException, 0, "phar error: rewrite callback must return a string or false");
-			goto cleanup_fail;
-		}
-
 		switch (Z_TYPE(retval)) {
 			case IS_STRING:
 				efree(entry);
@@ -3174,12 +3169,14 @@ static int phar_test_compression(zval *zv, void *argument) /* {{{ */
 	if (!PHAR_G(has_bz2)) {
 		if (entry->flags & PHAR_ENT_COMPRESSED_BZ2) {
 			*(int *) argument = 0;
+			return ZEND_HASH_APPLY_STOP;
 		}
 	}
 
 	if (!PHAR_G(has_zlib)) {
 		if (entry->flags & PHAR_ENT_COMPRESSED_GZ) {
 			*(int *) argument = 0;
+			return ZEND_HASH_APPLY_STOP;
 		}
 	}
 
@@ -4518,28 +4515,27 @@ PHP_METHOD(PharFileInfo, __construct)
 }
 /* }}} */
 
-#define PHAR_ENTRY_OBJECT() \
+#define PHAR_ENTRY_OBJECT_EX(throw) \
 	zval *zobj = ZEND_THIS; \
 	phar_entry_object *entry_obj = (phar_entry_object*)((char*)Z_OBJ_P(zobj) - Z_OBJ_P(zobj)->handlers->offset); \
 	if (!entry_obj->entry) { \
-		zend_throw_exception_ex(spl_ce_BadMethodCallException, 0, \
-			"Cannot call method on an uninitialized PharFileInfo object"); \
-		RETURN_THROWS(); \
+		if (throw) { \
+			zend_throw_exception_ex(spl_ce_BadMethodCallException, 0, \
+				"Cannot call method on an uninitialized PharFileInfo object"); \
+		} \
+		return; \
 	}
+
+#define PHAR_ENTRY_OBJECT() PHAR_ENTRY_OBJECT_EX(true)
 
 /* {{{ clean up directory-based entry objects */
 PHP_METHOD(PharFileInfo, __destruct)
 {
-	zval *zobj = ZEND_THIS;
-	phar_entry_object *entry_obj = (phar_entry_object*)((char*)Z_OBJ_P(zobj) - Z_OBJ_P(zobj)->handlers->offset);
-
 	if (zend_parse_parameters_none() == FAILURE) {
 		RETURN_THROWS();
 	}
 
-	if (!entry_obj->entry) {
-		return;
-	}
+	PHAR_ENTRY_OBJECT_EX(false);
 
 	if (entry_obj->entry->is_temp_dir) {
 		if (entry_obj->entry->filename) {
